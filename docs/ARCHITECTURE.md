@@ -168,32 +168,32 @@ cut** to protect the end-to-end claim flow, then built last, backend endpoints a
 
 ---
 
-## 3. Answers to the brief's questions
+## 3. Design topics
 
-**Q1. Core entities and relationships?**
+**3.1 Data model.**
 `User` (claimant or officer) 1─* `Policy` 1─* `Claim` 1─* `ClaimHistory` and 1─* `InformationRequest`.
 A claim optionally has an assigned officer (`User`). Supporting tables: `OutboxMessages` (events waiting to be
 sent) and `Notifications` (per user, unique per source event).
 
-**Q2. One service or more?** One deployable with module boundaries (§2.1). The Kafka seam means
+**3.2 Service boundaries.** One deployable with module boundaries (§2.1). The Kafka seam means
 Notifications (or a future fraud or reporting service) could be split out without changing Claims.
 
-**Q3. Sync vs event-driven?** Anything a user waits on is synchronous REST. Reactions are Kafka events (§2.2).
+**3.3 Request/response vs events.** Anything a user waits on is synchronous REST. Reactions are Kafka events (§2.2).
 
-**Q4. Frontend/backend contract, and who defines it?** The backend owns an OpenAPI document. The frontend
+**3.4 API contract.** The backend owns an OpenAPI document. The frontend
 consumes it, with types checked against it and contract tests guarding it (§2.9). Errors use one ProblemDetails shape.
 
-**Q5. Async across both tiers?** Backend: outbox → Kafka → idempotent consumer (§2.3–2.5). Frontend: the UI
+**3.5 Asynchronous processing, backend and frontend.** Backend: outbox → Kafka → idempotent consumer (§2.3–2.5). Frontend: the UI
 shows the synchronous result immediately; asynchronous results (notifications) arrive by polling. The UI expects
 eventual consistency, and on a 409 conflict it reloads the real state.
 
-**Q6. What does a claims officer need to manage their workload?** Built: a queue of open claims, **oldest first**,
+**3.6 Officer workload.** Built: a queue of open claims, **oldest first**,
 with tabs for Unassigned / Mine / All open, filters by status and market, the claim's **age in days**, the assigned
 officer, the claimed amount and the reserve. Each claim has its full timeline and Q&A, and officers are notified
 when a claimant answers. The **Team** screen adds the team view: unassigned claims, and per officer their open
 claims, the average age of those claims, and how many they settled or rejected in the last 7 days (§2.13).
 
-**Q7. What must the system know about outstanding liability exposure?** The **claimed amount is not the exposure**.
+**3.7 Liability exposure.** The **claimed amount is not the exposure**.
 The officer sets a **reserve** (the expected payout), and exposure = the sum of reserves on open claims
 (`Submitted`, `InReview`, `AwaitingInfo`), **grouped by market/currency** and by type. This is built as
 `GET /api/dashboard/exposure` and the **Exposure** screen (§2.13); the reserve stays hidden from claimants.

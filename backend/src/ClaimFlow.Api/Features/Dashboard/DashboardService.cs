@@ -37,7 +37,7 @@ public class DashboardService(AppDbContext db, TimeProvider time)
 
     /// <summary>
     /// Outstanding liability exposure: reserves on OPEN claims, per market and claim type.
-    /// Same query as docs/ARCHITECTURE.md §3 Q7, done as one SQL GROUP BY in the database.
+    /// Same query as docs/ARCHITECTURE.md §3.7, done as one SQL GROUP BY in the database.
     /// </summary>
     public async Task<LiabilityExposureDto> GetExposureAsync(CancellationToken ct)
     {
