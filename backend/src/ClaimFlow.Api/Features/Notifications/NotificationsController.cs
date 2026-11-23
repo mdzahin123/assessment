@@ -22,6 +22,7 @@ public class NotificationsController(AppDbContext db, TimeProvider time) : Contr
 
     /// <summary>Most recent notifications first (latest 50: this is a notification bell, not an archive).</summary>
     [HttpGet]
+    [ProducesResponseType<IReadOnlyList<NotificationDto>>(StatusCodes.Status200OK)]
     public async Task<IReadOnlyList<NotificationDto>> List(CancellationToken ct)
     {
         var me = User.ToCurrentUser();

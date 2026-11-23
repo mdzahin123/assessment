@@ -33,6 +33,7 @@ public class UsersController(AppDbContext db) : ControllerBase
 public class MeController(AppDbContext db, ClaimService claims) : ControllerBase
 {
     [HttpGet]
+    [ProducesResponseType<UserDto>(StatusCodes.Status200OK)]
     public async Task<UserDto> Get(CancellationToken ct)
     {
         var me = User.ToCurrentUser();
@@ -45,12 +46,14 @@ public class MeController(AppDbContext db, ClaimService claims) : ControllerBase
     /// <summary>Policies the claimant can claim against.</summary>
     [HttpGet("policies")]
     [Authorize(Roles = nameof(UserRole.Claimant))]
+    [ProducesResponseType<IReadOnlyList<PolicyDto>>(StatusCodes.Status200OK)]
     public Task<IReadOnlyList<PolicyDto>> Policies(CancellationToken ct) =>
         claims.GetMyPoliciesAsync(User.ToCurrentUser(), ct);
 
     /// <summary>The claimant's own claims, newest first.</summary>
     [HttpGet("claims")]
     [Authorize(Roles = nameof(UserRole.Claimant))]
+    [ProducesResponseType<IReadOnlyList<ClaimSummaryDto>>(StatusCodes.Status200OK)]
     public Task<IReadOnlyList<ClaimSummaryDto>> Claims(CancellationToken ct) =>
         claims.GetMyClaimsAsync(User.ToCurrentUser(), ct);
 }

@@ -33,12 +33,14 @@ public class ClaimsController(ClaimService claims) : ControllerBase
 
     /// <summary>One claim with its timeline. Claimants can only see their own (others return 404).</summary>
     [HttpGet("{id:guid}")]
+    [ProducesResponseType<ClaimDetailDto>(StatusCodes.Status200OK)]
     public Task<ClaimDetailDto> Get(Guid id, CancellationToken ct) =>
         claims.GetClaimAsync(User.ToCurrentUser(), id, ct);
 
     /// <summary>Officer work queue. Defaults to open claims, oldest first.</summary>
     [HttpGet]
     [Authorize(Roles = Officer)]
+    [ProducesResponseType<IReadOnlyList<ClaimSummaryDto>>(StatusCodes.Status200OK)]
     public Task<IReadOnlyList<ClaimSummaryDto>> Queue(
         [FromQuery] ClaimStatus? status, [FromQuery] Market? market,
         [FromQuery] QueueAssignee assignee = QueueAssignee.All, CancellationToken ct = default) =>
@@ -47,24 +49,28 @@ public class ClaimsController(ClaimService claims) : ControllerBase
     /// <summary>Officer picks up an unassigned claim (Submitted → InReview).</summary>
     [HttpPost("{id:guid}/assign")]
     [Authorize(Roles = Officer)]
+    [ProducesResponseType<ClaimDetailDto>(StatusCodes.Status200OK)]
     public Task<ClaimDetailDto> Assign(Guid id, CancellationToken ct) =>
         claims.AssignAsync(User.ToCurrentUser(), id, ct);
 
     /// <summary>Assigned officer sets the expected payout (does not change status).</summary>
     [HttpPut("{id:guid}/reserve")]
     [Authorize(Roles = Officer)]
+    [ProducesResponseType<ClaimDetailDto>(StatusCodes.Status200OK)]
     public Task<ClaimDetailDto> SetReserve(Guid id, AmountRequest request, CancellationToken ct) =>
         claims.SetReserveAsync(User.ToCurrentUser(), id, request.Amount!.Value, ct);
 
     /// <summary>Assigned officer asks the claimant a question (InReview → AwaitingInfo).</summary>
     [HttpPost("{id:guid}/information-requests")]
     [Authorize(Roles = Officer)]
+    [ProducesResponseType<ClaimDetailDto>(StatusCodes.Status200OK)]
     public Task<ClaimDetailDto> RequestInformation(Guid id, RequestInformationRequest request, CancellationToken ct) =>
         claims.RequestInformationAsync(User.ToCurrentUser(), id, request.Question!, ct);
 
     /// <summary>Claimant answers an open question (AwaitingInfo → InReview).</summary>
     [HttpPost("{id:guid}/information-requests/{requestId:guid}/response")]
     [Authorize(Roles = Claimant)]
+    [ProducesResponseType<ClaimDetailDto>(StatusCodes.Status200OK)]
     public Task<ClaimDetailDto> ProvideInformation(Guid id, Guid requestId, ProvideInformationRequest request,
         CancellationToken ct) =>
         claims.ProvideInformationAsync(User.ToCurrentUser(), id, requestId, request.Response!, ct);
@@ -72,12 +78,14 @@ public class ClaimsController(ClaimService claims) : ControllerBase
     /// <summary>Assigned officer settles the claim (InReview → Settled).</summary>
     [HttpPost("{id:guid}/settle")]
     [Authorize(Roles = Officer)]
+    [ProducesResponseType<ClaimDetailDto>(StatusCodes.Status200OK)]
     public Task<ClaimDetailDto> Settle(Guid id, AmountRequest request, CancellationToken ct) =>
         claims.SettleAsync(User.ToCurrentUser(), id, request.Amount!.Value, ct);
 
     /// <summary>Assigned officer rejects the claim (InReview/AwaitingInfo → Rejected).</summary>
     [HttpPost("{id:guid}/reject")]
     [Authorize(Roles = Officer)]
+    [ProducesResponseType<ClaimDetailDto>(StatusCodes.Status200OK)]
     public Task<ClaimDetailDto> Reject(Guid id, RejectClaimRequest request, CancellationToken ct) =>
         claims.RejectAsync(User.ToCurrentUser(), id, request.Reason!, ct);
 }
