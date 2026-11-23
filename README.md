@@ -4,8 +4,8 @@ A claims-management platform for motor and property insurance claims (take-home 
 Claimants report incidents, track claims, answer information requests, and receive decisions.
 Claims officers pick up claims, assess them, and settle or reject them.
 
-> Status: **Stage 1 — domain model, database schema, demo data and status-rule unit tests.**
-> No API endpoints yet (Stage 2). This README is updated at the end of each stage to reflect what actually works.
+> Status: **Stage 2 — REST API for claimants and officers, with unit + integration tests.**
+> No Kafka events or frontend yet. This README is updated at the end of each stage to reflect what actually works.
 
 ## Tech stack
 
@@ -35,11 +35,14 @@ docker compose ps          # both services should show "(healthy)"
 dotnet build backend/ClaimFlow.slnx
 dotnet run --project backend/src/ClaimFlow.Api
 # API: http://localhost:5006
+# Swagger UI: http://localhost:5006/swagger   (click "Authorize", paste a user ID from the table below)
 # OpenAPI contract: http://localhost:5006/openapi/v1.json
 
-# 3. Run tests
+# 3. Run tests (needs the PostgreSQL container running; uses a separate claimflow_test database)
 dotnet test backend/ClaimFlow.slnx
 ```
+
+`backend/src/ClaimFlow.Api/ClaimFlow.Api.http` contains a clickable walkthrough of the main flow.
 
 Stop the infrastructure with `docker compose down` (keeps data) or `docker compose down -v` (wipes the database;
 demo data is re-created on the next API start).
@@ -59,7 +62,7 @@ dotnet ef migrations add <Name> --project src/ClaimFlow.Api --output-dir Infrast
 
 ## Demo data
 
-Fictional users (fixed IDs, usable as `X-User-Id` once the API exists):
+Fictional users (fixed IDs, send as the `X-User-Id` header):
 
 | Name | Role | Id |
 |---|---|---|
@@ -83,6 +86,32 @@ Enforced in `Domain/Claim.cs`: `Status` has a private setter, so it can only cha
 and each method also writes a timeline (`ClaimHistory`) entry. Settlement cannot exceed the claimed amount;
 only the assigned officer can act on a claim.
 
+## API
+
+All endpoints except `GET /api/users` require an `X-User-Id` header (locked by default).
+
+| Method | Path | Who | Purpose |
+|---|---|---|---|
+| GET | `/api/users` | anyone | Demo users for the login picker |
+| GET | `/api/me` | any user | Current user |
+| GET | `/api/me/policies` | claimant | My policies |
+| GET | `/api/me/claims` | claimant | My claims, newest first |
+| POST | `/api/claims` | claimant | Report an incident → 201 + `Location` |
+| GET | `/api/claims/{id}` | both | Claim detail + timeline (claimants: own claims only) |
+| GET | `/api/claims?status=&market=&assignee=all\|me\|unassigned` | officer | Work queue (open claims, oldest first) |
+| POST | `/api/claims/{id}/assign` | officer | Pick up |
+| PUT | `/api/claims/{id}/reserve` | assigned officer | Set expected payout |
+| POST | `/api/claims/{id}/information-requests` | assigned officer | Ask the claimant a question |
+| POST | `/api/claims/{id}/information-requests/{requestId}/response` | claimant | Answer it |
+| POST | `/api/claims/{id}/settle` | assigned officer | Settle with an amount |
+| POST | `/api/claims/{id}/reject` | assigned officer | Reject with a reason |
+
+Errors are ProblemDetails JSON: **400** invalid input / business rule, **401** no or unknown user,
+**403** wrong role or not the assigned officer, **404** not found *or someone else's claim*
+(deliberately not 403, so claim IDs can't be probed), **409** wrong status or a concurrent update.
+
+The reserve (insurer's internal estimate) is hidden from claimants in every response.
+
 ## Local ports
 
 | Service | Host address | Note |
@@ -103,8 +132,14 @@ backend/
   dotnet-tools.json       Pinned dotnet-ef CLI version
   src/ClaimFlow.Api/
     Domain/               Entities + business rules (no database code)
+    Features/Claims/      Controller, service, request/response DTOs
+    Features/Users/       Demo user list, /api/me
+    Infrastructure/Auth/  Demo X-User-Id authentication
+    Infrastructure/Web/   Error → HTTP mapping, OpenAPI setup
     Infrastructure/Persistence/  DbContext, migrations, demo-data seeder
-  tests/ClaimFlow.Tests/  Unit tests (claim status rules)
+  tests/ClaimFlow.Tests/
+    Domain/               Unit tests (claim status rules)
+    Api/                  HTTP integration tests (real API + PostgreSQL)
 frontend/                 Angular app (later stage)
 docs/                     Architecture notes (later stage)
 ```
@@ -114,3 +149,5 @@ docs/                     Architecture notes (later stage)
 - Authentication is a fake user switcher (`X-User-Id` header) — **not secure**, demo only.
 - Settlement is capped at the claimed amount but not yet at the policy's coverage limit.
 - Database migrations run automatically on startup in Development only.
+- Officers see all claims (one shared team); no per-market or per-team access control.
+- Lists are not paged yet.

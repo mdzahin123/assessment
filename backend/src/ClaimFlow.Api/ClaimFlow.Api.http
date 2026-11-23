@@ -1,7 +1,68 @@
-@ClaimFlow.Api_HostAddress = http://localhost:5006
+# Manual API walkthrough. Works with the VS Code "REST Client" extension or Visual Studio.
+# Easier alternative: open http://localhost:5006/swagger, click "Authorize", paste a user ID.
 
-# Stage 0 smoke check: the generated OpenAPI (API contract) document.
-GET {{ClaimFlow.Api_HostAddress}}/openapi/v1.json
-Accept: application/json
+@host = http://localhost:5006
+@alex = 11111111-0000-0000-0000-000000000001
+@priya = 11111111-0000-0000-0000-000000000002
+@sam = 22222222-0000-0000-0000-000000000001
+@alexMotorPolicy = 33333333-0000-0000-0000-000000000001
 
-###
+### Demo users (public)
+GET {{host}}/api/users
+
+### No user -> 401
+GET {{host}}/api/me/claims
+
+### Alex's policies
+GET {{host}}/api/me/policies
+X-User-Id: {{alex}}
+
+### Alex's claims (no reserve shown to claimants)
+GET {{host}}/api/me/claims
+X-User-Id: {{alex}}
+
+### Alex submits a claim -> 201 (change incidentDate to a recent date)
+# @name submit
+POST {{host}}/api/claims
+X-User-Id: {{alex}}
+Content-Type: application/json
+
+{
+  "policyId": "{{alexMotorPolicy}}",
+  "incidentDate": "2026-11-20",
+  "description": "Scraped the passenger door on a car park pillar.",
+  "claimedAmount": 1850.00
+}
+
+### Priya tries to read Alex's new claim -> 404
+GET {{host}}/api/claims/{{submit.response.body.id}}
+X-User-Id: {{priya}}
+
+### Officer work queue: unassigned claims
+GET {{host}}/api/claims?assignee=unassigned
+X-User-Id: {{sam}}
+
+### Sam picks up the claim -> InReview (run twice: second time -> 409)
+POST {{host}}/api/claims/{{submit.response.body.id}}/assign
+X-User-Id: {{sam}}
+
+### Sam sets a reserve
+PUT {{host}}/api/claims/{{submit.response.body.id}}/reserve
+X-User-Id: {{sam}}
+Content-Type: application/json
+
+{ "amount": 1700.00 }
+
+### Sam settles -> Settled
+POST {{host}}/api/claims/{{submit.response.body.id}}/settle
+X-User-Id: {{sam}}
+Content-Type: application/json
+
+{ "amount": 1650.00 }
+
+### Sam tries to reject the settled claim -> 409
+POST {{host}}/api/claims/{{submit.response.body.id}}/reject
+X-User-Id: {{sam}}
+Content-Type: application/json
+
+{ "reason": "Too late" }

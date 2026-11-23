@@ -22,6 +22,9 @@ namespace ClaimFlow.Api.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.HasSequence("ClaimNumbers")
+                .StartsAt(1000L);
+
             modelBuilder.Entity("ClaimFlow.Api.Domain.Claim", b =>
                 {
                     b.Property<Guid>("Id")

@@ -130,3 +130,64 @@ unit tests), run the tests, and stop for review.
 Accepted the domain model, starter data, and unit tests after reviewing the four rules.
 **My notes:**
 I agree with the four rules for this demo, especially being able to reject a claim if the claimant never replies. Good catch fixing the package versions and the mixed-up timestamps in the sample data. Next I want to see the API endpoints and make sure claimants can't view or touch another claimant's claims.
+
+---
+
+## Entry 4 — Stage 2: REST API, auth, errors, OpenAPI, integration tests
+
+**Asked:** Commit Stage 1 as two commits. Explain DTOs, HTTP status codes, and how X-User-Id + ownership
+checks work, then build Stage 2 (claimant + officer endpoints, input checks, error responses,
+Swagger/OpenAPI, X-User-Id lookup), prove it works, update the journal, stop for review.
+My stated priority: claimants must not be able to view or touch another claimant's claims.
+
+**AI did / suggested:**
+- Demo auth as a standard ASP.NET Core **authentication handler** (reads X-User-Id, looks up the user,
+  attaches ID + role). Swapping to real JWT later replaces only this registration; `[Authorize(Roles=...)]`
+  and the ownership check stay. **Fallback policy = locked by default**: only `GET /api/users` is public.
+- Ownership enforced in ONE function (`ClaimService.LoadForUserAsync`) used by every read and action.
+  Someone else's claim → **404 not 403**, so a claimant can't discover which claim IDs exist.
+  Same for submitting against someone else's policy → "Policy not found."
+- Role-shaped responses: the **reserve is hidden from claimants** (amount and the "Reserve set" timeline line).
+  Concrete example of why DTOs exist: sending the DB entity would have leaked the insurer's estimate.
+- One central exception → HTTP mapping (`ApiExceptionHandler`): 400 rule broken / 403 not allowed /
+  404 not found / 409 wrong status or concurrent update. Controllers are one-liners; all errors are ProblemDetails JSON.
+- Validation split: request DTO attributes check shape (required, max length — lengths reuse the domain
+  constants); the domain checks business rules. No FluentValidation (not needed).
+- Claim numbers from a PostgreSQL **sequence** starting at 1000 (no collisions with seed data, safe when
+  two claimants submit at once; gaps are acceptable).
+- `TimeProvider` injected as the clock; Swagger UI (`/swagger`) with an "Authorize" box for X-User-Id.
+- Integration tests with `WebApplicationFactory` against a **separate `claimflow_test` database**
+  (wiped each run) instead of mocks: proves real routing, auth, SQL, and concurrency.
+- Officers see all claims (single team); queue defaults to open claims, oldest first; no paging yet.
+
+**Problems found while verifying (AI's own mistakes):**
+- Wrote `SqlQuery($"...nextval('{name}')")` — EF turns `{...}` into a SQL parameter, which can't go inside a
+  quoted name. Caught on review before running; switched to `SqlQueryRaw` with our own constant (no user input).
+- The OpenAPI contract described enums as **integers** while the API sends **strings** — .NET 10's OpenAPI
+  generator reads a different JSON settings object than controllers. Only found by inspecting the live
+  `/openapi/v1.json`; all tests were green. Fixed by configuring both from one function; contract now lists
+  the allowed string values. (Would have broken generated Angular types later.)
+
+**Verified:**
+- **47/47 tests pass** (27 domain + 20 API). The API tests cover 401 (no/unknown user), 403 (wrong role,
+  not assigned officer), 404 (other claimant's claim, unknown claim), 400 (missing fields listed per field,
+  business rule message), 409 (settle a rejected claim), reserve hidden from claimants, full journey,
+  queue filtering/order.
+- Concurrency now proven: two simultaneous pick-ups → exactly one 200 + one 409 and a single "Assigned" entry;
+  plus a deterministic test where both officers loaded the claim before either saved → second save rejected by
+  the `xmin` version check (DbUpdateConcurrencyException → 409).
+- Stage 1 open question closed: new history/info-request rows on an existing claim are INSERTed correctly
+  (full-journey test re-reads from the DB).
+- Tests have teeth: removing the ownership check + reserve hiding made exactly the 3 related tests fail; restored → 47/47.
+  (With the ownership check removed, Priya still couldn't answer Alex's question — the Stage 1 domain rule returned
+  403 — so the layers back each other up; the test failed because 403 reveals the claim exists.)
+- Dev database untouched by tests (still 6 claims); test DB had 13 new claims numbered from CLM-001000.
+- Live dev API: Swagger UI 200, 12 endpoints in the contract, X-User-Id scheme present, 401/200/404 behave as above,
+  new migration auto-applied.
+
+**Not done (by plan):** Kafka events + notifications (Stage 3), dashboards (Stage 4, first to cut), frontend.
+
+**Decision:** _(pending my review)_
+Accepted the Stage 2 API design, ownership checks, and the three queue/team/policy decisions for this demo.
+**My notes:**
+Glad the tests checked that claimants can't see each other's claims or the internal reserve amount, and that returning 404 hides whether another claim ID exists. Good catch fixing the status format in the API spec before building the frontend. Next I want to see how Kafka events and notifications work in plain English before Stage 3 code is written.

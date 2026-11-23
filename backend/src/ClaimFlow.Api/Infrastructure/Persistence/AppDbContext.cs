@@ -5,6 +5,9 @@ namespace ClaimFlow.Api.Infrastructure.Persistence;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
+    /// <summary>PostgreSQL sequence used to generate human-readable claim numbers (CLM-001000, ...).</summary>
+    public const string ClaimNumberSequence = "ClaimNumbers";
+
     public DbSet<User> Users => Set<User>();
     public DbSet<Policy> Policies => Set<Policy>();
     public DbSet<Claim> Claims => Set<Claim>();
@@ -28,6 +31,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Starts at 1000 so live claim numbers never collide with the seeded CLM-000001..CLM-000006.
+        modelBuilder.HasSequence<long>(ClaimNumberSequence).StartsAt(1000);
+
         // Our code creates all IDs itself (Guid.CreateVersion7()). Telling EF "never generate these"
         // matters: otherwise a NEW history entry added to an EXISTING claim, already carrying an Id,
         // would be mistaken for an existing row and EF would try to UPDATE it instead of INSERT.
