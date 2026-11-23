@@ -4,14 +4,14 @@ A claims-management platform for motor and property insurance claims (take-home 
 Claimants report incidents, track claims, answer information requests, and receive decisions.
 Claims officers pick up claims, assess them, and settle or reject them.
 
-> Status: **Stage 3 — REST API + Kafka claim events (transactional outbox) + notifications, with tests.**
-> No frontend yet. This README is updated at the end of each stage to reflect what actually works.
+> Status: **Backend (REST + Kafka outbox + notifications) and the core Angular flow for both roles.**
+> Not built yet: workload/exposure dashboards. This README reflects what actually works.
 
 ## Tech stack
 
 | Layer | Choice |
 |---|---|
-| Frontend | Angular (added in a later stage) |
+| Frontend | Angular 22 (standalone components, signals, reactive forms, zoneless) |
 | Backend | ASP.NET Core Web API, .NET 10 (one app — a "modular monolith") |
 | Database | PostgreSQL 17 (Docker) |
 | Messaging | Apache Kafka 4.1, KRaft mode, single node (Docker) |
@@ -21,7 +21,7 @@ Claims officers pick up claims, assess them, and settle or reject them.
 
 - .NET SDK 10
 - Docker Desktop (running)
-- Node.js 20+ (for the frontend, later)
+- Node.js ^22.22.3, ^24.15.0 or >=26 (Angular 22's requirement; tested with 24.19)
 
 ## Running locally
 
@@ -38,10 +38,25 @@ dotnet run --project backend/src/ClaimFlow.Api
 # Swagger UI: http://localhost:5006/swagger   (click "Authorize", paste a user ID from the table below)
 # OpenAPI contract: http://localhost:5006/openapi/v1.json
 
-# 3. Run tests (needs both containers running; uses a separate claimflow_test database
+# 3. Run the frontend (second terminal)
+cd frontend
+npm install
+npm start
+# App: http://localhost:4200  -> pick a demo user (e.g. Alex Tan, then Sam Lee via "Switch user")
+
+# 4. Run backend tests (needs both containers running; uses a separate claimflow_test database
 #    and a throwaway Kafka topic per run, so dev data and dev events are never touched)
 dotnet test backend/ClaimFlow.slnx
 ```
+
+### Try the main flow in the browser
+
+1. **Alex Tan** (claimant) → *Report an incident* → submit. A "We have received your claim" notification
+   appears in the bell within seconds (via Kafka).
+2. **Switch user → Sam Lee** (officer) → *Work queue* → open the claim → *Pick up*, set a reserve,
+   *Request information*.
+3. **Alex** → open the claim → answer the question.
+4. **Sam** → *Settle claim*. **Alex** gets the decision in the bell. (Reserve is never shown to Alex.)
 
 `backend/src/ClaimFlow.Api/ClaimFlow.Api.http` contains a clickable walkthrough of the main flow.
 
@@ -177,7 +192,10 @@ backend/
     Domain/               Unit tests (claim status rules)
     Notifications/        Unit tests (notification rules, event JSON)
     Api/                  Integration tests (real API + PostgreSQL + Kafka)
-frontend/                 Angular app (later stage)
+frontend/                 Angular app (see frontend/README.md)
+  proxy.conf.json         Dev server forwards /api -> localhost:5006 (no CORS needed)
+  src/app/core/           API types + client, session, X-User-Id interceptor, role guard, notifications
+  src/app/{login,claimant,staff,claims,shared}/  Screens
 docs/                     Architecture notes (later stage)
 ```
 
@@ -193,3 +211,7 @@ docs/                     Architecture notes (later stage)
 - Unreadable Kafka messages are logged and skipped; a real system would route them to a dead-letter topic.
 - Notifications and claims share one database (separate tables, no cross-reads); splitting Notifications
   into its own service would mean giving it its own database.
+- Frontend: notifications are polled every 10s (and on opening the bell), not pushed (SignalR would be next);
+  TypeScript API types are hand-written (checked against the OpenAPI contract; generating them is the next step);
+  no automated frontend tests (verified with a scripted browser walkthrough instead); not tuned for phones.
+- Dashboards (team workload, liability exposure) deliberately postponed in favour of the core flow.

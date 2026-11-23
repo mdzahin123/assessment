@@ -244,3 +244,63 @@ Accepted the Stage 3 outbox, Kafka consumer, and notifications setup, and agreed
 **My notes:**
 
 Seeing the claim still succeed when Kafka was off and then deliver the notification after Kafka restarted made the outbox idea super clear. Skipping dashboards for now to focus on the Angular screens fits my priority plan—we can come back to dashboards if there is time left.
+
+---
+
+## Entry 6 — Stage 5: Angular frontend (core flow)
+
+**Asked:** Commit Stage 3 as two commits. Explain standalone components/routing, services/HttpClient,
+interceptors/guards, signals/reactive forms/dev proxy in plain English; then build the core flow (demo user
+switcher, claimant report/list/detail, officer queue/actions), test it in the browser, update journal, stop.
+(My decision from Entry 5: dashboards skipped for now; frontend first.)
+
+**AI did / suggested:**
+- Angular **22.3.0** via the official CLI: standalone components, zoneless, signals for all screen state,
+  reactive forms, `@if/@for` templates, lazy-loaded routes. No SSR, no UI library, no NgRx, no generated spec files.
+- Explicitly enabled TypeScript `strict` and Angular `strictTemplates` (they weren't written in the generated
+  config; stated explicitly rather than relying on defaults).
+- **Dev proxy** (`proxy.conf.json`) forwards `/api` → `localhost:5006`, so no CORS change to the backend.
+- `ClaimsApi` = only place with URLs; `Session` (demo user in localStorage, wrapped in try/catch);
+  functional **interceptor** adds `X-User-Id` and on 401 returns to the user picker; functional **role guard**
+  (documented as UX only — the API is the real lock).
+- One **claim detail screen shared by both roles**; actions shown depend on role, status and assignment,
+  mirroring server rules. On 409 (e.g. colleague picked it up first) it shows the message and reloads.
+- Amounts shown in each market's currency (SGD, HKD…); reserve only shown to officers (API also hides it).
+- Notification bell polls every 10s (browser never talks to Kafka); SignalR named as the next step.
+
+**Problems found while verifying (AI's own mistakes / gaps):**
+- **Backend contract bug from Stage 2:** a script comparing the hand-written TS types with the OpenAPI contract
+  found `PolicyDto`, `ClaimSummaryDto`, `NotificationDto` missing. Cause: declaring error responses on a
+  controller stops .NET inferring the success type → **12 endpoints had no documented success response**.
+  In Stage 2 the AI reported "12 endpoints in the contract" without checking they were complete.
+  Fixed with explicit `[ProducesResponseType<T>(200)]`, and added `OpenApiContractTests` (fail on the old
+  code: verified by stashing the fix → 4 failures listing all 12 endpoints; pass with it).
+- PowerShell rewrote `angular.json` with a hidden UTF-8 BOM (Windows PowerShell 5.1 quirk) — detected and removed.
+- The browser test's first run failed one check: the bell already had older unread notifications, so the test
+  opened it before the new one was polled. Test timing, not an app bug — but it showed a real UX gap, so
+  **opening the bell now refreshes immediately**. Test changed to wait for the specific message.
+- README Node version was written from memory (20.19+); checking Angular's package showed 22 **dropped Node 20**
+  (needs ^22.22.3 / ^24.15.0 / >=26). Corrected.
+
+**Verified:**
+- Contract check script: all 7 TS interfaces match their DTOs field-for-field, all 6 enums value-for-value;
+  dev proxy forwards `:4200/api` to the API.
+- **Backend: 67/67 tests pass** (61 + 6 new contract tests).
+- **Scripted browser walkthrough in real Microsoft Edge (Playwright): 16/16 checks pass** — redirect to picker;
+  claimant list; guard blocks `/staff/queue` for a claimant; 4 client-side field messages on empty submit;
+  server rule message shown ("Incident date is outside the policy period."); submit → detail (Submitted);
+  "received" notification arrives via Kafka; officer sees it in Unassigned; pick up → reserve → question;
+  claimant does not see the reserve; claimant answers → In review; officer settles; claimant gets the decision;
+  Priya opening Alex's claim URL sees "Claim not found." (server 404); stale pick-up shows the 409 message and
+  refreshes to "Assigned to Sam Lee". Only browser console errors were the 3 deliberate 400/404/409 responses.
+- Screenshots reviewed (queue, officer detail while awaiting info, report-form validation): layout correct.
+- Production build: 297 kB initial (82 kB transferred), no budget warnings.
+
+**Not done:** dashboards (postponed), automated frontend tests (scripted walkthrough instead, kept outside the repo),
+phone layout tuning, generated API types, push notifications.
+
+**Decision:** _(pending my review)_
+Accepted the Angular core flow, shared claim detail screen, and keeping frontend test files out of scope; agreed to do the wrap-up stage before considering dashboards.
+
+**My notes:**
+Good catch finding the missing response types in the OpenAPI contract and making the notification bell refresh immediately when clicked. Sticking to our plan by keeping dashboards out of the way until core flows and setup docs are solid.
