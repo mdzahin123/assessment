@@ -1,86 +1,113 @@
 # ClaimFlow
 
-A claims-management platform for motor and property insurance claims (take-home assessment).
-Claimants report incidents, track claims, answer information requests, and receive decisions.
-Claims officers pick up claims, assess them, and settle or reject them.
+A claims platform for motor and property insurance claims (take-home assessment, sample data only).
 
-> Status: **Backend (REST + Kafka outbox + notifications) and the core Angular flow for both roles.**
-> Not built yet: workload/exposure dashboards. This README reflects what actually works.
+- **Claimants** report an incident, track their claim, answer the officer's questions and receive the decision.
+- **Claims officers** pick up claims from a shared queue, set a reserve (expected payout), ask questions,
+  and settle or reject.
 
-## Tech stack
-
-| Layer | Choice |
+| | |
 |---|---|
-| Frontend | Angular 22 (standalone components, signals, reactive forms, zoneless) |
-| Backend | ASP.NET Core Web API, .NET 10 (one app — a "modular monolith") |
-| Database | PostgreSQL 17 (Docker) |
-| Messaging | Apache Kafka 4.1, KRaft mode, single node (Docker) |
-| Tests | xUnit |
+| Frontend | Angular 22 (standalone components, signals, reactive forms) |
+| Backend | ASP.NET Core Web API on .NET 10: one deployable, modular |
+| Data / messaging | PostgreSQL 17 · Apache Kafka 4.1 (both in Docker) |
+| Tests | xUnit: domain unit tests + integration tests against real PostgreSQL and Kafka |
 
-## Prerequisites
+📐 **Design decisions, trade-offs and limitations:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+🤖 **How AI was used, challenged and overridden:** [AI_JOURNAL.md](AI_JOURNAL.md)
 
-- .NET SDK 10
-- Docker Desktop (running)
-- Node.js ^22.22.3, ^24.15.0 or >=26 (Angular 22's requirement; tested with 24.19)
+---
 
-## Running locally
+## 1. Prerequisites
+
+| Tool | Version | Check with |
+|---|---|---|
+| Docker Desktop | running | `docker info` |
+| .NET SDK | 10.x | `dotnet --version` |
+| Node.js | ^22.22.3, ^24.15.0 or >=26 (required by Angular 22) | `node --version` |
+
+Ports used on your machine: **5433** (PostgreSQL), **9092** (Kafka), **5006** (API), **4200** (web app).
+PostgreSQL uses 5433, not the usual 5432, so it can't clash with a PostgreSQL you may already have installed.
+
+## 2. Run it (two terminals, ~2 minutes)
+
+From the repository root:
 
 ```bash
-# 1. Start PostgreSQL and Kafka
+# 1) Infrastructure: PostgreSQL + Kafka. Wait until both show "(healthy)" (about 15-30 s).
 docker compose up -d
-docker compose ps          # both services should show "(healthy)"
+docker compose ps
 
-# 2. Build and run the API
-#    In Development it automatically applies database migrations and loads demo data on first run.
-dotnet build backend/ClaimFlow.slnx
+# 2) API (terminal 1). On first start it creates the database schema and loads demo data.
 dotnet run --project backend/src/ClaimFlow.Api
-# API: http://localhost:5006
-# Swagger UI: http://localhost:5006/swagger   (click "Authorize", paste a user ID from the table below)
-# OpenAPI contract: http://localhost:5006/openapi/v1.json
+#    -> ready when it prints "Now listening on: http://localhost:5006"
 
-# 3. Run the frontend (second terminal)
+# 3) Web app (terminal 2)
 cd frontend
-npm install
+npm ci
 npm start
-# App: http://localhost:4200  -> pick a demo user (e.g. Alex Tan, then Sam Lee via "Switch user")
-
-# 4. Run backend tests (needs both containers running; uses a separate claimflow_test database
-#    and a throwaway Kafka topic per run, so dev data and dev events are never touched)
-dotnet test backend/ClaimFlow.slnx
+#    -> open http://localhost:4200
 ```
 
-### Try the main flow in the browser
+### Try it (5 minutes)
 
-1. **Alex Tan** (claimant) → *Report an incident* → submit. A "We have received your claim" notification
-   appears in the bell within seconds (via Kafka).
-2. **Switch user → Sam Lee** (officer) → *Work queue* → open the claim → *Pick up*, set a reserve,
-   *Request information*.
-3. **Alex** → open the claim → answer the question.
-4. **Sam** → *Settle claim*. **Alex** gets the decision in the bell. (Reserve is never shown to Alex.)
+1. Choose **Alex Tan** (claimant) → **Report an incident** → pick a policy, a recent date, a description and an
+   amount → **Submit claim**. Within a few seconds **Notifications** shows "We have received your claim…"
+   (this one travels through Kafka).
+2. **Switch user → Sam Lee** (officer) → **Work queue** → open the claim → **Pick up this claim** →
+   save a **reserve** → **Request information**.
+3. **Switch user → Alex Tan** → open the claim → answer the question. Note that Alex never sees the reserve.
+4. **Switch user → Sam Lee** → **Settle claim**. Back as **Alex**, the decision is in **Notifications**.
+5. Optional: as **Priya Nair**, paste Alex's claim URL. You get "Claim not found." (the server hides other people's claims).
 
-`backend/src/ClaimFlow.Api/ClaimFlow.Api.http` contains a clickable walkthrough of the main flow.
+API explorer: **http://localhost:5006/swagger**. Click **Authorize** and paste a user ID from §5.
+`backend/src/ClaimFlow.Api/ClaimFlow.Api.http` has the same flow as clickable requests.
 
-Stop the infrastructure with `docker compose down` (keeps data) or `docker compose down -v` (wipes the database;
-demo data is re-created on the next API start).
-
-On the very first start against an empty database, the log shows one `fail: ... FROM "__EFMigrationsHistory"` line.
-This is expected: EF Core checks for its migration-tracking table before creating it.
-
-### Database migrations (developers)
-
-The EF Core CLI is pinned as a local tool in `backend/dotnet-tools.json`:
+### Stop / reset
 
 ```bash
-cd backend
-dotnet tool restore
-dotnet ef migrations add <Name> --project src/ClaimFlow.Api --output-dir Infrastructure/Persistence/Migrations
+# Ctrl+C in the API and web app terminals, then:
+docker compose down        # stop containers, keep data
+docker compose down -v     # stop and DELETE all data (demo data is recreated on the next API start)
 ```
 
-## Demo data
+## 3. Run the tests
 
-Fictional users (fixed IDs, send as the `X-User-Id` header):
+Needs the containers from step 1 running. Tests use their **own** database (`claimflow_test`, recreated each run)
+and a throwaway Kafka topic, so your dev data is never touched.
 
-| Name | Role | Id |
+```bash
+dotnet test backend/ClaimFlow.slnx
+# Expected: Passed! - Failed: 0, Passed: 67
+```
+
+| Suite | Count | Covers |
+|---|---|---|
+| `Domain/` | 27 | Claim status rules, input rules, final states |
+| `Notifications/` | 6 | Who is notified of what; event JSON |
+| `Api/` | 34 | Real HTTP + PostgreSQL + Kafka: auth (401/403), ownership (404), validation (400), wrong status (409), hidden reserve, concurrent pick-up, outbox, duplicate-event handling, Kafka round trip and ordering, OpenAPI completeness |
+
+Frontend build check: `cd frontend && npm run build`.
+
+## 4. Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `docker compose up` fails with "port is already allocated" | Something else uses 5433 or 9092. Stop it, or change the left-hand port in `docker-compose.yml` (and the connection string in `backend/src/ClaimFlow.Api/appsettings.Development.json`). |
+| API log: `Kafka not reachable yet … retrying` | Kafka is still starting. Wait for `docker compose ps` to show healthy. The API keeps working meanwhile: events wait in the outbox and are sent when Kafka is up. |
+| API log on the very first start: `fail: … FROM "__EFMigrationsHistory"` | Expected, once. EF Core checks for its migrations table before creating it. |
+| Web app shows "Cannot reach the server. Is the API running?" | Start the API (step 2). The web app forwards `/api` to `localhost:5006`. |
+| After `docker compose down -v` the web app jumps back to "Choose a demo user" | Expected: the remembered user no longer exists, so the app asks again. |
+| `npm ci` complains about the Node version | Install a Node version from §1. |
+| `npm ci` prints `npm warn allow-scripts … 4 packages have install scripts` | Harmless, no action needed. Newer npm holds back install scripts by default; those 4 packages (esbuild, lmdb, msgpackr-extract, @parcel/watcher) ship ready-made Windows/macOS/Linux binaries. Verified: the app runs and builds without approving them. |
+| Build error "file is locked by ClaimFlow.Api" | An API instance is still running. Stop it (Ctrl+C) before building or testing. |
+| Tests fail with timeouts in `EventsAndNotificationsTests` | Kafka isn't running or healthy (`docker compose ps`). |
+
+## 5. Reference
+
+### Demo users (fictional)
+
+| Name | Role | ID (for `X-User-Id` / Swagger) |
 |---|---|---|
 | Alex Tan | Claimant | `11111111-0000-0000-0000-000000000001` |
 | Priya Nair | Claimant | `11111111-0000-0000-0000-000000000002` |
@@ -88,130 +115,77 @@ Fictional users (fixed IDs, send as the `X-User-Id` header):
 | Jordan Ng | Officer | `22222222-0000-0000-0000-000000000002` |
 | Morgan Davis | Officer | `22222222-0000-0000-0000-000000000003` |
 
-Six claims cover every status (Submitted ×2, InReview, AwaitingInfo, Settled, Rejected).
+Six demo claims cover every status. The "login" is a **demo**: picking a user just sends their ID in a header.
+**It is not secure**, but the server still enforces roles and ownership.
 
-## Claim status rules
+### Claim status rules
 
 ```
 Submitted ──pick up──► InReview ──request info──► AwaitingInfo ──claimant responds──► InReview
-InReview ──settle(amount)──► Settled (final)
+InReview ──settle(amount ≤ claimed)──► Settled (final)
 InReview / AwaitingInfo ──reject(reason)──► Rejected (final)
 ```
+Only the assigned officer can act on a claim. Every change is recorded on the claim's timeline.
 
-Enforced in `Domain/Claim.cs`: `Status` has a private setter, so it can only change through these methods,
-and each method also writes a timeline (`ClaimHistory`) entry. Settlement cannot exceed the claimed amount;
-only the assigned officer can act on a claim.
+### API
 
-## API
-
-All endpoints except `GET /api/users` require an `X-User-Id` header (locked by default).
+All endpoints except `GET /api/users` need an `X-User-Id` header. Full contract: `/openapi/v1.json`.
 
 | Method | Path | Who | Purpose |
 |---|---|---|---|
 | GET | `/api/users` | anyone | Demo users for the login picker |
-| GET | `/api/me` | any user | Current user |
-| GET | `/api/me/policies` | claimant | My policies |
-| GET | `/api/me/claims` | claimant | My claims, newest first |
+| GET | `/api/me` | any user | Who am I |
+| GET | `/api/me/policies` · `/api/me/claims` | claimant | My policies, my claims (newest first) |
+| GET | `/api/me/notifications` · POST `/api/me/notifications/{id}/read` | any user | My latest 50 notifications; mark read |
 | POST | `/api/claims` | claimant | Report an incident → 201 + `Location` |
 | GET | `/api/claims/{id}` | both | Claim detail + timeline (claimants: own claims only) |
-| GET | `/api/claims?status=&market=&assignee=all\|me\|unassigned` | officer | Work queue (open claims, oldest first) |
+| GET | `/api/claims?assignee=all\|me\|unassigned&status=&market=` | officer | Work queue: open claims, oldest first |
 | POST | `/api/claims/{id}/assign` | officer | Pick up |
 | PUT | `/api/claims/{id}/reserve` | assigned officer | Set expected payout |
-| POST | `/api/claims/{id}/information-requests` | assigned officer | Ask the claimant a question |
-| POST | `/api/claims/{id}/information-requests/{requestId}/response` | claimant | Answer it |
-| POST | `/api/claims/{id}/settle` | assigned officer | Settle with an amount |
-| POST | `/api/claims/{id}/reject` | assigned officer | Reject with a reason |
-| GET | `/api/me/notifications` | any user | My latest 50 notifications, newest first |
-| POST | `/api/me/notifications/{id}/read` | owner | Mark one as read → 204 |
+| POST | `/api/claims/{id}/information-requests` | assigned officer | Ask the claimant |
+| POST | `/api/claims/{id}/information-requests/{requestId}/response` | claimant | Answer |
+| POST | `/api/claims/{id}/settle` · `/reject` | assigned officer | Decide |
 
-Errors are ProblemDetails JSON: **400** invalid input / business rule, **401** no or unknown user,
-**403** wrong role or not the assigned officer, **404** not found *or someone else's claim*
-(deliberately not 403, so claim IDs can't be probed), **409** wrong status or a concurrent update.
+Errors are ProblemDetails JSON: **400** invalid input or broken rule · **401** no/unknown user · **403** wrong role or
+not the assigned officer · **404** not found *or someone else's claim* · **409** wrong status or concurrent change.
 
-The reserve (insurer's internal estimate) is hidden from claimants in every response.
+### Kafka events
 
-## Events (Kafka) and notifications
-
-**REST** for everything a user waits on (submit, pick up, settle… succeed or fail immediately).
-**Kafka** for reactions to those changes that nobody should wait on (notifications today; fraud checks,
-reporting etc. could subscribe later without changing the Claims code).
-
-```
-API request ──► one DB transaction: claim change + ClaimHistory row + OutboxMessages row
-                                                                         │ every 1s
-                                          OutboxPublisher (background) ──┘──► Kafka topic "claim-events"
-                                                                                (3 partitions, key = claim ID)
-                                          NotificationConsumer (background) ◄──┘
-                                                │ idempotent: UNIQUE(SourceEventId)
-                                                ▼
-                                          Notifications table ──► GET /api/me/notifications (frontend polls)
+Every claim change emits an event on topic **`claim-events`** (3 partitions, key = claim ID) via a transactional
+outbox. Watch them live:
+```bash
+docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+  --topic claim-events --from-beginning --property print.key=true
 ```
 
-- **Transactional outbox**: every claim timeline entry produces an outbox row in the *same* `SaveChanges`
-  (hooked into `AppDbContext`), so the claim change and its event are saved together or not at all.
-  If Kafka is down, the API keeps working and events wait in the outbox (verified by stopping Kafka).
-- **At-least-once + idempotency**: a message may be delivered twice; the unique index on
-  `Notifications.SourceEventId` guarantees one notification per event.
-- **Ordering**: key = claim ID, so one claim's events share a partition and stay in order; the publisher
-  sends oldest-first and stops on failure instead of skipping ahead.
-- The reserve is internal: `ReserveSet` events produce no notification.
-
-Inspect events: `docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic claim-events --from-beginning --property print.key=true`
-
-Claims created before Stage 3 (e.g. the demo data in an existing database) have no events/notifications.
-To get notifications for the demo data too: `docker compose down -v`, `docker compose up -d`, then start the API.
-
-## Local ports
-
-| Service | Host address | Note |
-|---|---|---|
-| API | `localhost:5006` | |
-| PostgreSQL | `localhost:5433` | 5433, not the default 5432, to avoid clashing with a locally installed PostgreSQL |
-| Kafka | `localhost:9092` | |
-
-Database credentials in `docker-compose.yml` are throwaway local-development values.
-
-## Repository layout
+### Repository layout
 
 ```
-docker-compose.yml        PostgreSQL + Kafka for local dev
-AI_JOURNAL.md             Log of how AI was used, challenged and overridden
+docker-compose.yml           PostgreSQL + Kafka for local development
+docs/ARCHITECTURE.md         Decisions, trade-offs, answers to the brief's questions, limitations
+AI_JOURNAL.md                AI working journal
 backend/
-  ClaimFlow.slnx          Solution file
-  dotnet-tools.json       Pinned dotnet-ef CLI version
+  ClaimFlow.slnx             Solution
+  dotnet-tools.json          Pinned EF Core CLI (dotnet tool restore)
   src/ClaimFlow.Api/
-    Domain/               Entities + business rules (no database code)
-    Features/Claims/      Controller, service, request/response DTOs
-    Features/Users/       Demo user list, /api/me
-    Features/Notifications/  Kafka consumer, idempotent handler, rules, endpoint
-    Infrastructure/Messaging/  Event contract, outbox, Kafka publisher, topic setup
-    Infrastructure/Auth/  Demo X-User-Id authentication
-    Infrastructure/Web/   Error → HTTP mapping, OpenAPI setup
-    Infrastructure/Persistence/  DbContext, migrations, demo-data seeder
-  tests/ClaimFlow.Tests/
-    Domain/               Unit tests (claim status rules)
-    Notifications/        Unit tests (notification rules, event JSON)
-    Api/                  Integration tests (real API + PostgreSQL + Kafka)
-frontend/                 Angular app (see frontend/README.md)
-  proxy.conf.json         Dev server forwards /api -> localhost:5006 (no CORS needed)
-  src/app/core/           API types + client, session, X-User-Id interceptor, role guard, notifications
-  src/app/{login,claimant,staff,claims,shared}/  Screens
-docs/                     Architecture notes (later stage)
+    Domain/                  Entities + business rules (no database code)
+    Features/Claims/         Endpoints, service, request/response shapes
+    Features/Notifications/  Kafka consumer, duplicate-safe handler, rules, endpoint
+    Features/Users/          Demo user list, /api/me
+    Infrastructure/          Auth (demo), Messaging (outbox, Kafka), Persistence (EF Core, migrations, seed), Web (errors, OpenAPI)
+  tests/ClaimFlow.Tests/     Domain/, Notifications/, Api/
+frontend/                    Angular app (see frontend/README.md)
 ```
 
-## Known limitations (by design, for the time box)
+### Developer notes
 
-- Authentication is a fake user switcher (`X-User-Id` header) — **not secure**, demo only.
-- Settlement is capped at the claimed amount but not yet at the policy's coverage limit.
-- Database migrations run automatically on startup in Development only.
-- Officers see all claims (one shared team); no per-market or per-team access control.
-- Lists are not paged yet.
-- Outbox publisher assumes a single API instance (several would send duplicates — harmless thanks to
-  idempotency, but wasteful; next step: `SELECT … FOR UPDATE SKIP LOCKED`).
-- Unreadable Kafka messages are logged and skipped; a real system would route them to a dead-letter topic.
-- Notifications and claims share one database (separate tables, no cross-reads); splitting Notifications
-  into its own service would mean giving it its own database.
-- Frontend: notifications are polled every 10s (and on opening the bell), not pushed (SignalR would be next);
-  TypeScript API types are hand-written (checked against the OpenAPI contract; generating them is the next step);
-  no automated frontend tests (verified with a scripted browser walkthrough instead); not tuned for phones.
-- Dashboards (team workload, liability exposure) deliberately postponed in favour of the core flow.
+- New database migration: `cd backend && dotnet tool restore && dotnet ef migrations add <Name> --project src/ClaimFlow.Api --output-dir Infrastructure/Persistence/Migrations`
+- Migrations and demo data are applied automatically on API start **in Development only**.
+- Database credentials in `docker-compose.yml` are throwaway local-development values.
+
+## 6. Scope
+
+**Built:** claim lifecycle for both roles, end to end. **Not built (deliberately):** team-workload and
+liability-exposure dashboards, real authentication, file uploads. See
+[docs/ARCHITECTURE.md §5](docs/ARCHITECTURE.md#5-known-limitations-and-what-i-would-do-next-in-priority-order)
+for the full list and what comes next.

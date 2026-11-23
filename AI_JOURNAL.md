@@ -304,3 +304,52 @@ Accepted the Angular core flow, shared claim detail screen, and keeping frontend
 
 **My notes:**
 Good catch finding the missing response types in the OpenAPI contract and making the notification bell refresh immediately when clicked. Sticking to our plan by keeping dashboards out of the way until core flows and setup docs are solid.
+
+---
+
+## Entry 7 — Wrap-up: architecture doc, README, clean-room verification
+
+**Asked:** Commit Stage 5 as two commits. Explain the key trade-offs and limitations in plain English for the
+walkthrough; make setup/run/test docs crystal clear; run a clean verification (builds, tests, startup) proving
+everything works as documented; update the journal; stop. Dashboards only afterwards, if time allows.
+
+**AI did / suggested:**
+- New `docs/ARCHITECTURE.md` for the panel: system picture; 12 decisions each with why / cost / next; direct
+  answers to the brief's 7 questions; testing strategy; prioritised limitations and next steps.
+- For exposure (brief Q7), wrote the actual dashboard SQL into the doc (sum of reserves on open claims per
+  market/type, plus a count of claims with no reserve yet) — and **ran it against the dev DB** before claiming it works.
+- README rewritten from "stage log" into a run guide: prerequisites with check commands, copy-paste run steps,
+  a 5-minute guided demo, test commands with expected output, a troubleshooting table built from problems we
+  actually hit, then reference material. Uses `npm ci` (exact lockfile versions) instead of `npm install`.
+- **Clean-room check without destroying my dev data:** paused my containers (`docker compose stop`, data kept),
+  `git clone` into a temp folder, started *new empty* containers under a separate Docker project name
+  (`-p claimflowfresh`), followed the README literally, then deleted those containers + volume and restarted mine.
+  (Considered `docker compose down -v` on my own containers — rejected because it would wipe my data.)
+
+**Problems found while verifying:**
+- README errors in the AI's own first draft, caught on re-read: `/api/me` listed as claimant-only (it's any user);
+  "3 terminals" (it's 2). Fixed.
+- `npm ci` on the fresh clone printed `npm warn allow-scripts` (newer npm holds back install scripts of esbuild,
+  lmdb, msgpackr-extract, @parcel/watcher). Investigated instead of ignoring: all four ship prebuilt binaries;
+  the app served and built without approving them. Documented in Troubleshooting; did not approve scripts that
+  aren't needed.
+
+**Verified (fresh clone of commit `63d61a4`, empty database):**
+- 87 tracked files; **no PDF/DOCX tracked** (assessment brief stays out of git).
+- Containers healthy in ~7 s; empty DB → API applied all 3 migrations, seeded demo data, created the Kafka topic
+  (3 partitions), published 16 demo events; only the documented first-run `fail` line appeared.
+- `npm ci` 9 s; web app reachable via the dev proxy; page title "ClaimFlow".
+- **Edge browser walkthrough: 16/16 checks pass** on the clean install.
+- **`dotnet test`: 67/67 pass**; frontend production build clean (297 kB / 82 kB transferred).
+- Clean-up: fresh containers and volume removed; my containers restarted healthy with data intact
+  (10 claims, highest CLM-001005); no stray processes on ports 5006/4200.
+
+**Not done:** dashboards (next, if time allows — the SQL is already written and tested).
+
+**Decision:** _(pending my review)_
+
+Accepted the wrap-up documentation, README fixes, and clean-install verification; keeping dashboards optional depending on remaining time.
+
+**My notes:**
+
+Running a fresh-clone check from the README without wiping my dev data and catching the two README mistakes gives me confidence the setup works cleanly for anyone reviewing it. Having the trade-offs and SQL exposure query written down clearly in ARCHITECTURE.md will make my walkthrough much easier.
