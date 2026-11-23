@@ -40,7 +40,7 @@ don't claim anything works unless it was run and tested.
 - Changed priority (mine): the AI listed workload/exposure dashboards as backend must-haves. I said
   core claim features come first and dashboards / extra styling are the first things cut if time runs short.
 
-**My notes:** _(fill in: anything I questioned or would push back on)_
+**My notes:**
 I didn't know much of this stack yet, so I asked for simple explanations first and told Claude to put core claim features ahead of extras like dashboards if time runs out.
 ---
 
@@ -248,6 +248,8 @@ Seeing the claim still succeed when Kafka was off and then deliver the notificat
 ---
 
 ## Entry 6 — Stage 5: Angular frontend (core flow)
+
+_(There is no Stage 4 entry: Stage 4 was the dashboards, skipped in Entry 5 to build the frontend first. They are built in Entry 8.)_
 
 **Asked:** Commit Stage 3 as two commits. Explain standalone components/routing, services/HttpClient,
 interceptors/guards, signals/reactive forms/dev proxy in plain English; then build the core flow (demo user
