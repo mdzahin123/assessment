@@ -5,9 +5,11 @@ import {
   AppNotification,
   ClaimDetail,
   ClaimSummary,
+  LiabilityExposure,
   Policy,
   QueueFilter,
   SubmitClaimRequest,
+  TeamWorkload,
   User,
 } from './api-models';
 
@@ -82,5 +84,14 @@ export class ClaimsApi {
 
   reject(id: string, reason: string): Observable<ClaimDetail> {
     return this.http.post<ClaimDetail>(`/api/claims/${id}/reject`, { reason });
+  }
+
+  // --- dashboards (officers only; computed live by the API)
+  getWorkload(): Observable<TeamWorkload> {
+    return this.http.get<TeamWorkload>('/api/dashboard/workload');
+  }
+
+  getExposure(): Observable<LiabilityExposure> {
+    return this.http.get<LiabilityExposure>('/api/dashboard/exposure');
   }
 }

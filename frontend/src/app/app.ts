@@ -17,7 +17,7 @@ import { Session } from './core/session';
         <nav>
           @if (session.isOfficer()) {
             <a routerLink="/staff/queue" routerLinkActive="active">Work queue</a>
-          } @else {
+            <a routerLink="/staff/team" routerLinkActive="active">Team</a>          } @else {
             <a routerLink="/claims" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">My claims</a>
             <a routerLink="/claims/new" routerLinkActive="active">Report an incident</a>
           }

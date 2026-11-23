@@ -41,6 +41,11 @@ export const routes: Routes = [
         loadComponent: () => import('./staff/claim-queue').then((m) => m.ClaimQueue),
       },
       {
+        path: 'team',
+        title: 'ClaimFlow · Team workload',
+        loadComponent: () => import('./staff/team-workload').then((m) => m.TeamWorkloadPage),
+      },
+      {
         path: 'claims/:id',
         title: 'ClaimFlow · Claim',
         loadComponent: () => import('./claims/claim-detail').then((m) => m.ClaimDetailPage),

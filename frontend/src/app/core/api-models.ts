@@ -100,6 +100,44 @@ export interface AppNotification {
   isRead: boolean;
 }
 
+export interface OfficerWorkload {
+  officerId: string;
+  officerName: string;
+  openClaims: number;
+  averageOpenAgeDays: number | null; // null when the officer has nothing open
+  settledLast7Days: number;
+  rejectedLast7Days: number;
+}
+
+export interface TeamWorkload {
+  unassignedClaims: number;
+  decisionWindowDays: number;
+  officers: OfficerWorkload[];
+  generatedAt: string;
+}
+
+export interface ExposureByType {
+  type: ClaimType;
+  openClaims: number;
+  reservedAmount: number;
+  claimsWithoutReserve: number;
+}
+
+/** One market, all amounts in that market's currency. There is deliberately no cross-market total. */
+export interface MarketExposure {
+  market: Market;
+  currency: string;
+  openClaims: number;
+  reservedAmount: number;
+  claimsWithoutReserve: number;
+  byType: ExposureByType[];
+}
+
+export interface LiabilityExposure {
+  markets: MarketExposure[];
+  generatedAt: string;
+}
+
 export interface SubmitClaimRequest {
   policyId: string;
   incidentDate: string;
