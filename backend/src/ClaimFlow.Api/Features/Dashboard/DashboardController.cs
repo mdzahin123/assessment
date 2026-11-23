@@ -19,4 +19,9 @@ public class DashboardController(DashboardService dashboard) : ControllerBase
     [HttpGet("workload")]
     [ProducesResponseType<TeamWorkloadDto>(StatusCodes.Status200OK)]
     public Task<TeamWorkloadDto> Workload(CancellationToken ct) => dashboard.GetWorkloadAsync(ct);
+
+    /// <summary>Reserves on open claims per market (in that market's currency) and type. Markets are never summed together.</summary>
+    [HttpGet("exposure")]
+    [ProducesResponseType<LiabilityExposureDto>(StatusCodes.Status200OK)]
+    public Task<LiabilityExposureDto> Exposure(CancellationToken ct) => dashboard.GetExposureAsync(ct);
 }
