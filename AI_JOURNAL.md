@@ -355,3 +355,56 @@ Accepted the wrap-up documentation, README fixes, and clean-install verification
 **My notes:**
 
 Running a fresh-clone check from the README without wiping my dev data and catching the two README mistakes gives me confidence the setup works cleanly for anyone reviewing it. Having the trade-offs and SQL exposure query written down clearly in ARCHITECTURE.md will make my walkthrough much easier.
+
+---
+
+## Entry 8 — Stage 4 (built last): team workload and liability exposure
+
+**Asked:** A review against the brief found two gaps: staff must "see their team's workload and performance", and
+managers need a real-time picture of outstanding claims and liability exposure. Plan first and wait for OK; build in
+small steps with tests and a commit after each; business rules on the backend; never show the reserve to claimants;
+never add money across markets; no new libraries; also tidy the journal (Entry 1 placeholder, missing Stage 4).
+
+**AI suggested:**
+- Two officer-only, read-only endpoints computed **live with SQL** (no cache, no Kafka read model):
+  `GET /api/dashboard/workload` and `GET /api/dashboard/exposure`, plus a **Team** and an **Exposure** screen.
+- **One definition of "open"** (`Claim.OpenStatuses`) shared by the queue, workload and exposure.
+- Workload arithmetic and exposure grouping as **pure functions** with "now" passed in, so exact numbers can be
+  unit-tested with a fixed clock **without adding a test library**. Decisions (settled/rejected in 7 days) taken from
+  the claim timeline (who decided, when) rather than the claim's last-updated time.
+- Exposure grouped by **market first**, each market with its **currency from the backend** (`MarketCurrency`), totals
+  only within a market, **no grand total**; "claims without a reserve" counted separately as unquantified exposure.
+- API tests compare numbers **before and after** their own actions, because other tests share the test database.
+- **No Manager role:** the brief defines two user types and says staff need the team view; a Manager role would also
+  need to read claims, which means changing the ownership check late in the build. Documented in ARCHITECTURE.md §2.13
+  with the next step (restrict exposure to a manager or finance role once real identity exists).
+
+**Decision:**
+- Approved the plan. Average age measured **from submission** (matches the queue's age column). **No Manager role**,
+  explained in the docs. **Both backend endpoints with tests before either screen**, in case time ran short.
+- The brief's questions as restated in ARCHITECTURE.md §3: to be reviewed in the final check.
+
+**Why:** the two gaps are explicit brief requirements; building backend-first kept the required part safe if time ran
+out, and keeping the dashboards read-only meant no change to the claim flow, the outbox or the security code.
+
+**Problems found while verifying (AI's own mistakes):**
+- Added the Exposure route and menu link while building the Team screen, before the Exposure page existed; caught
+  before building and moved to the next step so every commit builds on its own.
+- ARCHITECTURE.md said the endpoint matches its SQL, but the documented SQL lacked `coalesce(…, 0)` (empty vs 0 when a
+  group has no reserves). Corrected to the exact query that was compared.
+
+**Verified:**
+- **82/82 backend tests pass** (+5 workload calculator, +4 exposure calculator, +6 dashboard API tests: claimants 403
+  on both; submit/pick-up/settle move workload numbers; unreserved claim counted separately; a 500 reserve raises only
+  AU's total by exactly 500 while SG is unchanged; settled claims drop out; JSON has no cross-market total).
+- Teeth checks: removing the 7-day window → the calculator test failed; counting closed claims in exposure → the
+  exposure API test failed. Restored → all pass.
+- The exposure endpoint and the documented SQL give **identical rows** on the dev database (4 market/type rows).
+- Browser (Edge): **24/24 checks**: Team screen numbers equal the API's for every officer, "(you)" marked, claimants
+  have no link, are redirected by the guard and get 403 from the API; one Exposure card per market, each showing only
+  its own currency, totals equal to the API's, no grand total, claimants redirected. 0 browser console errors.
+- Frontend production build clean (302 kB initial / 82 kB transferred; new screens lazy-loaded, ~3.5 kB each).
+
+**Not done:** Manager role (by decision), dashboard auto-refresh, exposure trend over time.
+
+**My notes:**

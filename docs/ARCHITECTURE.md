@@ -11,8 +11,9 @@ How to run it is in the [README](../README.md). How AI was used is in the [AI jo
  Browser (Angular 22)
    │  REST/JSON  (/api/... → dev proxy → :5006)      polls notifications every 10s
    ▼
- ASP.NET Core API (.NET 10) — ONE deployable, three modules
+ ASP.NET Core API (.NET 10) — ONE deployable, four modules
  ┌──────────────────────────────────────────────────────────────────────────────┐
+ │  Dashboard module (read-only: team workload, liability exposure, live SQL)   │
  │  Claims module            Notifications module            Users (demo auth)   │
  │  controller → service →   Kafka consumer → handler →     X-User-Id → identity │
  │  domain (Claim rules)     Notifications table                                 │
@@ -28,9 +29,9 @@ How to run it is in the [README](../README.md). How AI was used is in the [AI jo
 ```
 
 **Built:** the claims backend (domain rules, REST API, demo auth, ownership rules, concurrency control),
-Kafka events through a transactional outbox, claimant and officer notifications, and an Angular UI for the
-full claim lifecycle for both roles.
-**Not built:** team workload and liability-exposure dashboards (see §5). The data they need is already stored.
+Kafka events through a transactional outbox, claimant and officer notifications, an Angular UI for the
+full claim lifecycle for both roles, and officer screens for **team workload** and **liability exposure** (§2.13).
+**Not built:** real authentication, a separate Manager role (§2.13), document uploads (see §5).
 
 ---
 
@@ -143,7 +144,27 @@ InReview / AwaitingInfo ──reject(reason)──► Rejected (final)
 
 ### 2.12 How time was spent
 Backend first, as the brief asks. Every stage was tested before moving on. The **dashboards were the first thing
-cut** to protect the end-to-end claim flow; their data is already in place (§3, Q6–Q7).
+cut** to protect the end-to-end claim flow, then built last, backend endpoints and tests before either screen (§2.13).
+
+### 2.13 Dashboards: team workload and liability exposure
+- **Computed live** with SQL on every request: no cache, no Kafka-fed read model. At this scale a query takes
+  milliseconds and the numbers are always current. **Next at scale:** a read model updated from `claim-events`.
+- **One definition of "open"** (`Claim.OpenStatuses`: Submitted, InReview, AwaitingInfo), shared by the queue,
+  workload and exposure, so they can never disagree.
+- **Workload:** per officer, open claims, average age **measured from submission** (same as the queue's age column),
+  and settled/rejected decisions in the last 7 days, taken from the claim timeline (who decided, when); plus the
+  unassigned count. The arithmetic is a pure function, unit-tested with a fixed clock.
+- **Exposure:** one SQL `GROUP BY` market and type over open claims: count, sum of reserves, count with no reserve.
+  The currency of each market is defined on the backend (`MarketCurrency`) and sent with the numbers.
+  **Markets are never added together:** there is no grand total in the API or on screen, and a test checks the JSON.
+- **Who can see it: officers, no separate Manager role.** The brief defines two user types (claimants and claims
+  staff) and says *staff* need to see their team's workload, so officers seeing it is the requirement. Exposure is
+  aggregate (no claimant details), so officer access is low-risk in a demo. A Manager role was considered and
+  rejected for now: managers would also need to *read* claims, which means changing the ownership check (the most
+  security-sensitive code) late in the build. **Next:** with real identity, restrict exposure to a manager or finance
+  role; that's a one-line change to the endpoint's authorization attribute.
+- **Cost:** the workload endpoint loads one small row per open claim and does the arithmetic in C#; at scale that
+  would move into SQL. The screens refresh when opened or when **Refresh** is pressed (no auto-refresh).
 
 ---
 
@@ -169,15 +190,16 @@ eventual consistency, and on a 409 conflict it reloads the real state.
 **Q6. What does a claims officer need to manage their workload?** Built: a queue of open claims, **oldest first**,
 with tabs for Unassigned / Mine / All open, filters by status and market, the claim's **age in days**, the assigned
 officer, the claimed amount and the reserve. Each claim has its full timeline and Q&A, and officers are notified
-when a claimant answers. Not built yet: a team view (open claims per officer, average age, settled this week),
-which is a simple aggregate query over existing data.
+when a claimant answers. The **Team** screen adds the team view: unassigned claims, and per officer their open
+claims, the average age of those claims, and how many they settled or rejected in the last 7 days (§2.13).
 
 **Q7. What must the system know about outstanding liability exposure?** The **claimed amount is not the exposure**.
 The officer sets a **reserve** (the expected payout), and exposure = the sum of reserves on open claims
-(`Submitted`, `InReview`, `AwaitingInfo`), **grouped by market/currency** and by type. The data is captured and
-the reserve is hidden from claimants; the dashboard query would be:
+(`Submitted`, `InReview`, `AwaitingInfo`), **grouped by market/currency** and by type. This is built as
+`GET /api/dashboard/exposure` and the **Exposure** screen (§2.13); the reserve stays hidden from claimants.
+The endpoint runs the equivalent of this query (checked to give identical results on the same data):
 ```sql
-SELECT "Market", "Type", count(*) AS open_claims, sum("ReserveAmount") AS reserved,
+SELECT "Market", "Type", count(*) AS open_claims, coalesce(sum("ReserveAmount"), 0) AS reserved,
        count(*) FILTER (WHERE "ReserveAmount" IS NULL) AS not_yet_reserved
 FROM "Claims" WHERE "Status" IN ('Submitted','InReview','AwaitingInfo')
 GROUP BY "Market", "Type";
@@ -192,23 +214,28 @@ GROUP BY "Market", "Type";
 |---|---|---|
 | Domain unit tests | Every status rule, input rule, final states, full journey | 27 |
 | Notification unit tests | Who is told what; event JSON round trip | 6 |
-| API integration tests | Real API in memory + **real PostgreSQL + real Kafka** (no mocks): auth 401/403, ownership 404, validation 400, wrong status 409, reserve hidden, concurrency (parallel pick-ups and a stale `xmin` save), outbox written with the claim, idempotency, Kafka round trip, partition ordering, OpenAPI completeness | 34 |
-| Browser walkthrough | Scripted Edge (Playwright) run of the whole flow for both roles: 16 checks. Kept outside the repo, as agreed | n/a |
+| Dashboard unit tests | Workload arithmetic (average age, 7-day window, unassigned) and exposure grouping (per-market totals, currencies), fixed clock | 9 |
+| API integration tests | Real API in memory + **real PostgreSQL + real Kafka** (no mocks): auth 401/403, ownership 404, validation 400, wrong status 409, reserve hidden, concurrency (parallel pick-ups and a stale `xmin` save), outbox written with the claim, idempotency, Kafka round trip, partition ordering, OpenAPI completeness, dashboards (claimants 403, numbers before/after actions, closed claims excluded, no cross-market total) | 40 |
+| Browser walkthrough | Scripted Edge (Playwright) runs of the whole flow for both roles (16 checks) and the Team and Exposure screens against the API's numbers (24 checks). Kept outside the repo, as agreed | n/a |
 
 Tests use a **separate database and a throwaway Kafka topic per run**, so they never touch dev data.
 Several tests were checked for "teeth": each one was shown to **fail** when the rule it protects was deliberately
-broken (ownership, reserve hiding, settle-while-waiting, idempotency safety net, message key, OpenAPI completeness).
+broken (ownership, reserve hiding, settle-while-waiting, idempotency safety net, message key, OpenAPI completeness,
+the 7-day decision window, closed claims excluded from exposure).
 
 ---
 
 ## 5. Known limitations and what I would do next (in priority order)
 
 1. **Real authentication** (OIDC/JWT). The demo header is not secure.
-2. **Dashboards:** team workload and liability exposure (§3, Q6–Q7). The data is ready.
+2. **A Manager / finance role** for exposure, once real identity exists (§2.13): a one-line authorization change.
 3. **Settlement capped at the policy coverage limit** (today it is capped at the claimed amount only).
 4. **Document uploads** (photos, reports) for information requests, the most obvious missing claimant feature.
 5. **Outbox for several instances** (`FOR UPDATE SKIP LOCKED`) and a **dead-letter topic**.
 6. **Push notifications** (SignalR) instead of polling; **generated TypeScript types**; paging for lists.
-7. **Access control by market or team** for officers (today everyone sees the shared queue).
-8. **Operations:** health checks, structured logging and tracing, CI pipeline, migrations as a deployment step.
-9. **Frontend:** automated component tests, a phone-friendly layout, accessibility review.
+7. **Access control by market or team** for officers (today everyone sees the shared queue and dashboards).
+8. **Dashboards at scale:** workload arithmetic in SQL or a Kafka-fed read model; exposure trend over time;
+   auto-refresh. The frontend also keeps its own copy of the market→currency table for the claim screens
+   (the dashboards use the API's); sending the currency with every claim would remove that duplication.
+9. **Operations:** health checks, structured logging and tracing, CI pipeline, migrations as a deployment step.
+10. **Frontend:** automated component tests, a phone-friendly layout, accessibility review.

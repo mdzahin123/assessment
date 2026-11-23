@@ -17,6 +17,6 @@ Structure (`src/app`):
 | `core/` | API types, `ClaimsApi` (all HTTP calls), `Session` (demo user), interceptor, role guard, notifications polling |
 | `login/` | Demo user picker |
 | `claimant/` | My claims, report an incident |
-| `staff/` | Officer work queue |
+| `staff/` | Officer work queue, Team workload, Liability exposure |
 | `claims/` | Claim detail (shared by both roles; actions depend on role, status and assignment) |
 | `shared/` | Status badge |

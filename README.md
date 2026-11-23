@@ -4,7 +4,8 @@ A claims platform for motor and property insurance claims (take-home assessment,
 
 - **Claimants** report an incident, track their claim, answer the officer's questions and receive the decision.
 - **Claims officers** pick up claims from a shared queue, set a reserve (expected payout), ask questions,
-  and settle or reject.
+  and settle or reject. They also see the **team's workload and performance** and the outstanding
+  **liability exposure** per market.
 
 | | |
 |---|---|
@@ -59,6 +60,10 @@ npm start
 3. **Switch user → Alex Tan** → open the claim → answer the question. Note that Alex never sees the reserve.
 4. **Switch user → Sam Lee** → **Settle claim**. Back as **Alex**, the decision is in **Notifications**.
 5. Optional: as **Priya Nair**, paste Alex's claim URL. You get "Claim not found." (the server hides other people's claims).
+6. As **Sam Lee**, open **Team**: unassigned claims, and per officer their open claims, average age and
+   decisions in the last 7 days. Then open **Exposure**: reserves on open claims, one card per market in that
+   market's own currency, plus how many open claims have no reserve yet. Set a reserve on a claim and press
+   **Refresh** to see the number change. (Claimants have no access to either screen.)
 
 API explorer: **http://localhost:5006/swagger**. Click **Authorize** and paste a user ID from §5.
 `backend/src/ClaimFlow.Api/ClaimFlow.Api.http` has the same flow as clickable requests.
@@ -78,14 +83,15 @@ and a throwaway Kafka topic, so your dev data is never touched.
 
 ```bash
 dotnet test backend/ClaimFlow.slnx
-# Expected: Passed! - Failed: 0, Passed: 67
+# Expected: Passed! - Failed: 0, Passed: 82
 ```
 
 | Suite | Count | Covers |
 |---|---|---|
 | `Domain/` | 27 | Claim status rules, input rules, final states |
 | `Notifications/` | 6 | Who is notified of what; event JSON |
-| `Api/` | 34 | Real HTTP + PostgreSQL + Kafka: auth (401/403), ownership (404), validation (400), wrong status (409), hidden reserve, concurrent pick-up, outbox, duplicate-event handling, Kafka round trip and ordering, OpenAPI completeness |
+| `Dashboard/` | 9 | Workload arithmetic (average age, 7-day window, unassigned) and exposure grouping (per-market totals, currencies) with a fixed clock |
+| `Api/` | 40 | Real HTTP + PostgreSQL + Kafka: auth (401/403), ownership (404), validation (400), wrong status (409), hidden reserve, concurrent pick-up, outbox, duplicate-event handling, Kafka round trip and ordering, OpenAPI completeness, dashboards (claimants 403, numbers move correctly, closed claims excluded, no cross-market total) |
 
 Frontend build check: `cd frontend && npm run build`.
 
@@ -145,6 +151,8 @@ All endpoints except `GET /api/users` need an `X-User-Id` header. Full contract:
 | POST | `/api/claims/{id}/information-requests` | assigned officer | Ask the claimant |
 | POST | `/api/claims/{id}/information-requests/{requestId}/response` | claimant | Answer |
 | POST | `/api/claims/{id}/settle` · `/reject` | assigned officer | Decide |
+| GET | `/api/dashboard/workload` | officer | Unassigned count; per officer: open claims, average age (days since submission), settled/rejected in the last 7 days |
+| GET | `/api/dashboard/exposure` | officer | Open claims per market (with its currency) and type: count, total reserve, count without a reserve. No cross-market total |
 
 Errors are ProblemDetails JSON: **400** invalid input or broken rule · **401** no/unknown user · **403** wrong role or
 not the assigned officer · **404** not found *or someone else's claim* · **409** wrong status or concurrent change.
@@ -171,9 +179,10 @@ backend/
     Domain/                  Entities + business rules (no database code)
     Features/Claims/         Endpoints, service, request/response shapes
     Features/Notifications/  Kafka consumer, duplicate-safe handler, rules, endpoint
+    Features/Dashboard/      Team workload + liability exposure (read-only, computed live)
     Features/Users/          Demo user list, /api/me
     Infrastructure/          Auth (demo), Messaging (outbox, Kafka), Persistence (EF Core, migrations, seed), Web (errors, OpenAPI)
-  tests/ClaimFlow.Tests/     Domain/, Notifications/, Api/
+  tests/ClaimFlow.Tests/     Domain/, Notifications/, Dashboard/, Api/
 frontend/                    Angular app (see frontend/README.md)
 ```
 
@@ -185,7 +194,7 @@ frontend/                    Angular app (see frontend/README.md)
 
 ## 6. Scope
 
-**Built:** claim lifecycle for both roles, end to end. **Not built (deliberately):** team-workload and
-liability-exposure dashboards, real authentication, file uploads. See
+**Built:** claim lifecycle for both roles, end to end; officer screens for team workload and liability exposure.
+**Not built (deliberately):** real authentication, a separate Manager role, file uploads. See
 [docs/ARCHITECTURE.md §5](docs/ARCHITECTURE.md#5-known-limitations-and-what-i-would-do-next-in-priority-order)
 for the full list and what comes next.
