@@ -71,3 +71,62 @@ start containers, stop for review.
 Checked that the containers and API actually ran. Good call using port 5433 so it doesn't clash with my existing Postgres on 5432, and skipping HTTPS for local setup. Since the brief is a .docx file, I'm making sure *.docx is ignored in git too.
 **My notes:**
 Some of the Docker and Kafka settings were new to me, so I asked for plain-English explanations first and verified the setup myself before committing Stage 0.
+
+---
+
+## Entry 3 — Stage 1: domain model, database, status rules, tests
+
+**Asked:** Before committing Stage 0, add `*.docx` to .gitignore (the brief is a .docx). Then explain
+entities vs DTOs, EF Core/migrations, decimal + UTC, state-machine methods and optimistic concurrency
+in plain English; then build Stage 1 only (entities, strict status rules, migration, seed data,
+unit tests), run the tests, and stop for review.
+
+**AI did / suggested:**
+- Domain classes with **private setters**; status changes only through `Submit / AssignTo / SetReserve /
+  RequestInformation / ProvideInformation / Settle / Reject`. Each checks status → who → input, then
+  changes state and writes a `ClaimHistory` entry together. Three exception types (rule broken /
+  wrong status / not allowed) so Stage 2 can map them to 400 / 409 / 403 without repeating rules.
+- Business rules it proposed (I should confirm these are right):
+  - Settle only from InReview (not while waiting for the claimant); Reject allowed from InReview or AwaitingInfo
+    (e.g. claimant never replies).
+  - Settlement ≤ claimed amount. Coverage-limit cap NOT enforced yet (listed as a known limitation).
+  - Only the assigned officer can act; any officer can pick up an unassigned claim.
+  - Amounts must be > 0 with max 2 decimal places; incident date within policy period, not in the future.
+- `Guid.CreateVersion7()` IDs (time-ordered, friendlier to database indexes than random GUIDs).
+- Enums stored as text, money as `numeric(18,2)`, timestamps as `timestamptz` (UTC), set once in
+  `ConfigureConventions` instead of per property.
+- Concurrency via PostgreSQL's hidden `xmin` column (`IsRowVersion()` on a `uint Version`).
+- `ValueGeneratedNever()` on all IDs: otherwise EF may treat a new history row with a pre-set ID, added
+  to an already-saved claim, as an existing row and try to UPDATE it instead of INSERT.
+- Seeder builds demo claims through the real domain methods (so seed data obeys the same rules),
+  runs only on an empty DB, fixed user IDs for API testing, fictional people and `example.com` emails.
+- Auto-migrate + seed on startup in Development only.
+- Rejected by AI (to keep it simple): snake_case naming package, a separate Domain project, a
+  repository layer over EF Core, a per-claim "line number" column on history.
+
+**Problems found while verifying (the AI's own mistakes):**
+- `dotnet add package` picked EF Core **11.0.0**, which requires .NET 11 → restore failed. Also
+  `dotnet-ef` 11 got installed. Fixed by pinning exact 10.x versions (Npgsql EF 10.0.4, EF Design
+  10.0.15, dotnet-ef 10.0.15). Lesson: "latest" ≠ compatible.
+- First API run crashed ("relation Users does not exist") because the AI ran with `--no-build` after
+  adding the migration, so the running program didn't contain it. Rebuilt → migration applied.
+- Inspecting the seeded data in psql showed the timeline listing "ReserveSet" before "Assigned":
+  the seeder gave both the same timestamp. Fixed the seed times; did not add a sequence column
+  (ties can't happen in real use, since each action is a separate request).
+- A stale `dotnet run` from my Stage 0 check was locking the build output; AI checked what it was
+  before stopping it.
+
+**Verified:**
+- Build: 0 warnings, 0 errors. Migration applied to Postgres; 5 tables; column types checked in psql;
+  `xmin` readable and no extra column created. Seed: 5 users, 4 policies, 6 claims (all statuses), 1 info request.
+- **27/27 unit tests pass.** Sanity check that the tests have teeth: temporarily allowed Settle while
+  AwaitingInfo → exactly 1 test failed (`Settle_while_waiting_for_the_claimant_fails`); reverted → 27/27.
+
+**Not yet verified (needs Stage 2 endpoints + real DB):**
+- Optimistic concurrency actually returning a conflict when two officers pick up the same claim.
+- Adding history/info-request rows to an already-saved claim inserts correctly (the `ValueGeneratedNever` concern).
+
+**Decision:** _(pending my review)_
+Accepted the domain model, starter data, and unit tests after reviewing the four rules.
+**My notes:**
+I agree with the four rules for this demo, especially being able to reject a claim if the claimant never replies. Good catch fixing the package versions and the mixed-up timestamps in the sample data. Next I want to see the API endpoints and make sure claimants can't view or touch another claimant's claims.
