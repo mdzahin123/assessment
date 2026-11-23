@@ -21,6 +21,9 @@ public class Claim
     public const int DescriptionMaxLength = 2000;
     public const int TextMaxLength = 1000;
 
+    /// <summary>Statuses where the claim is still being worked on (not yet settled or rejected).</summary>
+    public static readonly ClaimStatus[] OpenStatuses = [ClaimStatus.Submitted, ClaimStatus.InReview, ClaimStatus.AwaitingInfo];
+
     private readonly List<ClaimHistoryEntry> _history = [];
     private readonly List<InformationRequest> _informationRequests = [];
 

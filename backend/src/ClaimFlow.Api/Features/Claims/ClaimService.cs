@@ -42,7 +42,7 @@ public class ClaimService(AppDbContext db, TimeProvider time)
 
         query = status is { } s
             ? query.Where(c => c.Status == s)
-            : query.Where(c => c.Status != ClaimStatus.Settled && c.Status != ClaimStatus.Rejected);
+            : query.Where(c => Claim.OpenStatuses.Contains(c.Status));
         if (market is { } m)
             query = query.Where(c => c.Market == m);
         query = assignee switch

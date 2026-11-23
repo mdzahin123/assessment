@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using ClaimFlow.Api.Features.Claims;
+using ClaimFlow.Api.Features.Dashboard;
 using ClaimFlow.Api.Features.Notifications;
 using ClaimFlow.Api.Infrastructure.Auth;
 using ClaimFlow.Api.Infrastructure.Messaging;
@@ -33,6 +34,7 @@ builder.Services.AddSingleton(TimeProvider.System); // injectable clock (tests c
 // --- Features ---------------------------------------------------------------
 builder.Services.AddScoped<ClaimService>();
 builder.Services.AddScoped<NotificationHandler>();
+builder.Services.AddScoped<DashboardService>();
 
 // --- Kafka: outbox publisher (DB -> Kafka) and notification consumer (Kafka -> DB) -------
 // Both are background workers: they start with the app, run alongside the API and stop with it.
