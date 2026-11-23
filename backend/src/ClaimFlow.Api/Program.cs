@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using ClaimFlow.Api.Features.Claims;
+using ClaimFlow.Api.Features.Notifications;
 using ClaimFlow.Api.Infrastructure.Auth;
+using ClaimFlow.Api.Infrastructure.Messaging;
 using ClaimFlow.Api.Infrastructure.Persistence;
 using ClaimFlow.Api.Infrastructure.Web;
 using Microsoft.AspNetCore.Authentication;
@@ -30,6 +32,13 @@ builder.Services.AddSingleton(TimeProvider.System); // injectable clock (tests c
 
 // --- Features ---------------------------------------------------------------
 builder.Services.AddScoped<ClaimService>();
+builder.Services.AddScoped<NotificationHandler>();
+
+// --- Kafka: outbox publisher (DB -> Kafka) and notification consumer (Kafka -> DB) -------
+// Both are background workers: they start with the app, run alongside the API and stop with it.
+builder.Services.Configure<KafkaOptions>(builder.Configuration.GetSection(KafkaOptions.Section));
+builder.Services.AddHostedService<OutboxPublisher>();
+builder.Services.AddHostedService<NotificationConsumer>();
 
 // --- Demo authentication (X-User-Id header) — NOT SECURE, see DemoUserAuthenticationHandler
 builder.Services.AddAuthentication(DemoUserAuthenticationHandler.SchemeName)

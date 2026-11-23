@@ -1,4 +1,6 @@
 using ClaimFlow.Api.Domain;
+using ClaimFlow.Api.Features.Notifications;
+using ClaimFlow.Api.Infrastructure.Messaging;
 using Microsoft.EntityFrameworkCore;
 
 namespace ClaimFlow.Api.Infrastructure.Persistence;
@@ -13,6 +15,44 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Claim> Claims => Set<Claim>();
     public DbSet<ClaimHistoryEntry> ClaimHistory => Set<ClaimHistoryEntry>();
     public DbSet<InformationRequest> InformationRequests => Set<InformationRequest>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<Notification> Notifications => Set<Notification>();
+
+    // ------------------------------------------------------------------ transactional outbox
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        AddOutboxMessagesForNewHistory();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        AddOutboxMessagesForNewHistory();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>
+    /// Every new claim timeline entry becomes an outbox message, inside the SAME SaveChanges call,
+    /// so both are written in one database transaction: either both exist or neither does.
+    /// Because it hooks into saving itself, no endpoint can "forget" to publish an event.
+    /// </summary>
+    private void AddOutboxMessagesForNewHistory()
+    {
+        // Entries() runs EF's change detection first, so history entries just added to a claim's list are found.
+        var newEntries = ChangeTracker.Entries<ClaimHistoryEntry>()
+            .Where(e => e.State == EntityState.Added)
+            .Select(e => e.Entity)
+            .ToList();
+        if (newEntries.Count == 0)
+            return;
+
+        var trackedClaims = ChangeTracker.Entries<Claim>().ToDictionary(e => e.Entity.Id, e => e.Entity);
+        var alreadyQueued = ChangeTracker.Entries<OutboxMessage>().Select(e => e.Entity.Id).ToHashSet();
+
+        foreach (var entry in newEntries.Where(h => !alreadyQueued.Contains(h.Id))) // safe if SaveChanges is retried
+            OutboxMessages.Add(OutboxMessage.For(ClaimEvent.From(trackedClaims[entry.ClaimId], entry)));
+    }
 
     /// <summary>Rules applied to every property of a given C# type, across all tables.</summary>
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
@@ -92,6 +132,28 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(r => r.Id).ValueGeneratedNever();
             e.Property(r => r.Question).HasMaxLength(Claim.TextMaxLength);
             e.Property(r => r.Response).HasMaxLength(Claim.TextMaxLength);
+        });
+
+        modelBuilder.Entity<OutboxMessage>(e =>
+        {
+            e.Property(o => o.Id).ValueGeneratedNever();
+            e.Property(o => o.Type).HasMaxLength(50);
+            e.Property(o => o.Key).HasMaxLength(100);
+            e.Property(o => o.Payload).HasColumnType("jsonb");
+            e.Property(o => o.LastError).HasMaxLength(1000);
+            // Partial index over unpublished rows only: exactly what the publisher looks for every second.
+            e.HasIndex(o => new { o.OccurredAt, o.Id }).HasFilter("\"PublishedAt\" IS NULL");
+        });
+
+        modelBuilder.Entity<Notification>(e =>
+        {
+            e.Property(n => n.Id).ValueGeneratedNever();
+            e.Property(n => n.ClaimNumber).HasMaxLength(30);
+            e.Property(n => n.Message).HasMaxLength(1200);
+            // Idempotency guarantee: one notification per event, even if Kafka delivers the event twice.
+            e.HasIndex(n => n.SourceEventId).IsUnique();
+            e.HasIndex(n => new { n.UserId, n.CreatedAt });
+            e.HasOne<User>().WithMany().HasForeignKey(n => n.UserId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

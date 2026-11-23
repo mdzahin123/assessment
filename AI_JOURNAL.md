@@ -191,3 +191,56 @@ My stated priority: claimants must not be able to view or touch another claimant
 Accepted the Stage 2 API design, ownership checks, and the three queue/team/policy decisions for this demo.
 **My notes:**
 Glad the tests checked that claimants can't see each other's claims or the internal reserve amount, and that returning 404 hides whether another claim ID exists. Good catch fixing the status format in the API spec before building the frontend. Next I want to see how Kafka events and notifications work in plain English before Stage 3 code is written.
+
+---
+
+## Entry 5 — Stage 3: transactional outbox, Kafka, notifications
+
+**Asked:** Commit Stage 2 as two commits. Explain dual-write/outbox, at-least-once + idempotency,
+message keys + ordering, and BackgroundService in plain English; then build Stage 3 (outbox + publisher,
+notification consumer, notifications endpoint, tests), verify end-to-end, update the journal, stop for review.
+
+**AI did / suggested:**
+- **Outbox hooked into `AppDbContext.SaveChanges`**: every new `ClaimHistory` row becomes an `OutboxMessages`
+  row in the same save → same DB transaction. Chosen over "each endpoint publishes" because no code path can
+  forget, and over separate domain-event classes because the timeline already records exactly these facts.
+  EventId = history entry ID (stable ID for idempotency). Event has a `SchemaVersion` for future changes.
+- **OutboxPublisher** (BackgroundService): every 1s, oldest-first, `Acks=All` + producer idempotence, ticks
+  off one message at a time, **stops on the first failure** to keep order. Single-instance assumption documented.
+- **NotificationConsumer** (BackgroundService on `Task.Run` because `Consume()` blocks): manual commit only
+  after the notification is saved; transient error → re-read same message after 5s; unreadable message → log + skip
+  (dead-letter topic named as the real-world next step).
+- **Idempotency**: check "seen this event?" + UNIQUE index on `SourceEventId` as the safety net for races.
+- **Key = claim ID**, topic created explicitly with 3 partitions (not auto-create); retries while Kafka is down.
+- Notification rules: claimant hears about submitted / under review / question / settled / rejected;
+  assigned officer hears when the claimant responds; **ReserveSet → no notification** (internal).
+- Notifications module never reads Claims tables (only events) → could be split out later; shares the DB for now.
+- `GET /api/me/notifications` (latest 50) + `POST …/{id}/read`; frontend will poll (browser never talks to Kafka).
+- Tests use a separate DB **and a throwaway Kafka topic + consumer group per run**, deleted afterwards.
+- Turned EF SQL logging down to Warning: the publisher polls every second and would flood the console.
+
+**Problems found while verifying:**
+- My own PowerShell command had broken quoting once (tooling, not code) — rerun.
+- My Stage 2 review `dotnet run` was still running and locking the build; the AI checked the process before stopping it.
+- No code bugs surfaced this stage, so the teeth checks below matter more.
+
+**Verified:**
+- **61/61 tests pass** (27 domain + 6 notification-rule/JSON unit + 28 integration). Includes: outbox row written
+  with the claim and sharing its history ID; failed action writes no outbox row; same event twice → 1 notification;
+  same event 5× concurrently → 1 notification (unique index path); users only see/mark their own notifications (404
+  otherwise); **real Kafka round trip** submit → notification; **6 events of one claim on a single partition, in order**.
+- Teeth checks: removing the unique-violation safety net → concurrent-duplicate test failed; random message key →
+  ordering test failed (it could no longer find the claim's events by key). Restored → 61/61.
+- **Live, dev app:** Kafka up → notification ~1s after submit. **Kafka stopped → API still returned 201**, outbox row
+  waited (attempt 1, "Message timed out"), no notification. **Kafka restarted → delivered ~4s later**, row published
+  after 2 attempts. Startup not blocked by the consumer; migration auto-applied; topic created with 3 partitions.
+
+**Not done (by plan):** dashboards (Stage 4, first to cut), frontend (Stage 5).
+
+**Decision:** _(pending my review)_
+
+Accepted the Stage 3 outbox, Kafka consumer, and notifications setup, and agreed to skip Stage 4 (dashboards) for now so we build the Angular frontend first and only come back to dashboards if time allows.
+
+**My notes:**
+
+Seeing the claim still succeed when Kafka was off and then deliver the notification after Kafka restarted made the outbox idea super clear. Skipping dashboards for now to focus on the Angular screens fits my priority plan—we can come back to dashboards if there is time left.

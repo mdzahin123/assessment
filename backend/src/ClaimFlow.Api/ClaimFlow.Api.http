@@ -60,6 +60,10 @@ Content-Type: application/json
 
 { "amount": 1650.00 }
 
+### Alex's notifications (arrive via Kafka about a second after each step)
+GET {{host}}/api/me/notifications
+X-User-Id: {{alex}}
+
 ### Sam tries to reject the settled claim -> 409
 POST {{host}}/api/claims/{{submit.response.body.id}}/reject
 X-User-Id: {{sam}}

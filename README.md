@@ -4,8 +4,8 @@ A claims-management platform for motor and property insurance claims (take-home 
 Claimants report incidents, track claims, answer information requests, and receive decisions.
 Claims officers pick up claims, assess them, and settle or reject them.
 
-> Status: **Stage 2 — REST API for claimants and officers, with unit + integration tests.**
-> No Kafka events or frontend yet. This README is updated at the end of each stage to reflect what actually works.
+> Status: **Stage 3 — REST API + Kafka claim events (transactional outbox) + notifications, with tests.**
+> No frontend yet. This README is updated at the end of each stage to reflect what actually works.
 
 ## Tech stack
 
@@ -38,7 +38,8 @@ dotnet run --project backend/src/ClaimFlow.Api
 # Swagger UI: http://localhost:5006/swagger   (click "Authorize", paste a user ID from the table below)
 # OpenAPI contract: http://localhost:5006/openapi/v1.json
 
-# 3. Run tests (needs the PostgreSQL container running; uses a separate claimflow_test database)
+# 3. Run tests (needs both containers running; uses a separate claimflow_test database
+#    and a throwaway Kafka topic per run, so dev data and dev events are never touched)
 dotnet test backend/ClaimFlow.slnx
 ```
 
@@ -105,12 +106,45 @@ All endpoints except `GET /api/users` require an `X-User-Id` header (locked by d
 | POST | `/api/claims/{id}/information-requests/{requestId}/response` | claimant | Answer it |
 | POST | `/api/claims/{id}/settle` | assigned officer | Settle with an amount |
 | POST | `/api/claims/{id}/reject` | assigned officer | Reject with a reason |
+| GET | `/api/me/notifications` | any user | My latest 50 notifications, newest first |
+| POST | `/api/me/notifications/{id}/read` | owner | Mark one as read → 204 |
 
 Errors are ProblemDetails JSON: **400** invalid input / business rule, **401** no or unknown user,
 **403** wrong role or not the assigned officer, **404** not found *or someone else's claim*
 (deliberately not 403, so claim IDs can't be probed), **409** wrong status or a concurrent update.
 
 The reserve (insurer's internal estimate) is hidden from claimants in every response.
+
+## Events (Kafka) and notifications
+
+**REST** for everything a user waits on (submit, pick up, settle… succeed or fail immediately).
+**Kafka** for reactions to those changes that nobody should wait on (notifications today; fraud checks,
+reporting etc. could subscribe later without changing the Claims code).
+
+```
+API request ──► one DB transaction: claim change + ClaimHistory row + OutboxMessages row
+                                                                         │ every 1s
+                                          OutboxPublisher (background) ──┘──► Kafka topic "claim-events"
+                                                                                (3 partitions, key = claim ID)
+                                          NotificationConsumer (background) ◄──┘
+                                                │ idempotent: UNIQUE(SourceEventId)
+                                                ▼
+                                          Notifications table ──► GET /api/me/notifications (frontend polls)
+```
+
+- **Transactional outbox**: every claim timeline entry produces an outbox row in the *same* `SaveChanges`
+  (hooked into `AppDbContext`), so the claim change and its event are saved together or not at all.
+  If Kafka is down, the API keeps working and events wait in the outbox (verified by stopping Kafka).
+- **At-least-once + idempotency**: a message may be delivered twice; the unique index on
+  `Notifications.SourceEventId` guarantees one notification per event.
+- **Ordering**: key = claim ID, so one claim's events share a partition and stay in order; the publisher
+  sends oldest-first and stops on failure instead of skipping ahead.
+- The reserve is internal: `ReserveSet` events produce no notification.
+
+Inspect events: `docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic claim-events --from-beginning --property print.key=true`
+
+Claims created before Stage 3 (e.g. the demo data in an existing database) have no events/notifications.
+To get notifications for the demo data too: `docker compose down -v`, `docker compose up -d`, then start the API.
 
 ## Local ports
 
@@ -134,12 +168,15 @@ backend/
     Domain/               Entities + business rules (no database code)
     Features/Claims/      Controller, service, request/response DTOs
     Features/Users/       Demo user list, /api/me
+    Features/Notifications/  Kafka consumer, idempotent handler, rules, endpoint
+    Infrastructure/Messaging/  Event contract, outbox, Kafka publisher, topic setup
     Infrastructure/Auth/  Demo X-User-Id authentication
     Infrastructure/Web/   Error → HTTP mapping, OpenAPI setup
     Infrastructure/Persistence/  DbContext, migrations, demo-data seeder
   tests/ClaimFlow.Tests/
     Domain/               Unit tests (claim status rules)
-    Api/                  HTTP integration tests (real API + PostgreSQL)
+    Notifications/        Unit tests (notification rules, event JSON)
+    Api/                  Integration tests (real API + PostgreSQL + Kafka)
 frontend/                 Angular app (later stage)
 docs/                     Architecture notes (later stage)
 ```
@@ -151,3 +188,8 @@ docs/                     Architecture notes (later stage)
 - Database migrations run automatically on startup in Development only.
 - Officers see all claims (one shared team); no per-market or per-team access control.
 - Lists are not paged yet.
+- Outbox publisher assumes a single API instance (several would send duplicates — harmless thanks to
+  idempotency, but wasteful; next step: `SELECT … FOR UPDATE SKIP LOCKED`).
+- Unreadable Kafka messages are logged and skipped; a real system would route them to a dead-letter topic.
+- Notifications and claims share one database (separate tables, no cross-reads); splitting Notifications
+  into its own service would mean giving it its own database.
